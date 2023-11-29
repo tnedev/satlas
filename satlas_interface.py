@@ -95,7 +95,7 @@ class Satlas:
         for label, color in labels.items():
             if label_count >= max_labels_per_line:
                 y += legend_height_per_line
-                x = 10
+                x = (image.width - item_width * min(max_labels_per_line, len(labels))) // 2  # Centered
                 label_count = 0
 
             draw.rectangle([x, y - 10, x + 20, y + 10], fill=color, outline=(0, 0, 0))
@@ -177,10 +177,9 @@ class Satlas:
         head_idx = 0
         crop_size = 1024
         vis_output = np.zeros((self.input_image.shape[0], self.input_image.shape[1], 3), dtype=np.uint8)
+        used_labels = []  # Keep track of used labels (int) to add to legend
 
         with torch.no_grad():
-
-            used_labels = []
             for crop, row, col, original_h, original_w in tqdm(self._image_crop_generator()):
                 vis_crop = crop.transpose(2, 0, 1)
                 gpu_crop = torch.as_tensor(vis_crop.copy()).to(self.device).float() / 255
@@ -194,8 +193,15 @@ class Satlas:
                             )
 
                 vis_output[row:row+crop_size, col:col+crop_size, :] = result_crop[:original_h, :original_w, :]
-                used_labels += list(set(outputs[0][0]['labels'].tolist()))
-            
+                if type(outputs[head_idx][0]) == dict:  # Check if the model has labels in the output
+                    used_labels += outputs[head_idx][0]['labels'].tolist()
+
+            # Get the ids of all unique labels used
+            if not used_labels:
+                task_name = self.config['Tasks'][head_idx]['Name']
+                used_labels = list(range(len(tasks[task_name]['categories'])))
+            else:
+                used_labels = list(set(used_labels))  # Remove duplicates
         image = Image.fromarray(vis_output)
 
         if add_legend:
