@@ -1,1 +1,14 @@
+# Ignore the data directory where weights, data and results are stored
+data/
+
 **/__pycache__
+
+# Ignore the virtual environment
+venv/
+env/
+
+.DS_Store
+
+# Pycharm files
+.idea/
+
