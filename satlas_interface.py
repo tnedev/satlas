@@ -1,6 +1,8 @@
 import os
 import contextlib
 import json
+import math
+from enum import Enum
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -21,6 +23,30 @@ class Satlas:
 
     img_formats = ['png', 'jpg', 'jpeg', 'jp2', 'tif']
 
+    class Task(Enum):
+        """
+        Enum for the different tasks that the model can perform.
+        """
+        POLYGON = 0
+        POINT = 1
+        LAND_COVER = 2
+        POLYLINE_BIN_SEGMENT = 3
+        DEM = 4
+        CROP_TYPE = 5
+        TREE_COVER = 6
+        PARK_SPORT = 7
+        PARK_TYPE = 8
+        POWER_PLANT_TYPE = 9
+        QUARRY_RESOURCE = 10
+        TRACK_SPORT = 11
+        ROAD_TYPE = 12
+        WILDFIRE = 13
+        VESSEL = 14
+        SMOKE = 15
+        SNOW = 16
+        FLOOD = 17
+        CLOUD = 18
+
     def __init__(self):
         """
         Initialize the Satlas interface.
@@ -38,16 +64,16 @@ class Satlas:
         # Download the model if it doesn't exist
         if not os.path.exists(self.weights_path):
             print('Model not found. Downloading...')
-            os.system(f'wget {MODEL_WEIGHTS_URL} --show-progress -O {self.weights_path}') 
+            os.system(f'wget {MODEL_WEIGHTS_URL} --show-progress -O {self.weights_path}')
 
-        # Load configuration
+            # Load configuration
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
                 self.config = json.load(f)
         else:
             print("Configuration file not found.")
             return
-        
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for spec in self.config['Tasks']:
             if 'Task' not in spec:
@@ -70,26 +96,25 @@ class Satlas:
         Add a legend to the image.
         """
 
-        # Create a temporary image to measure text size
-        temp_img = Image.new('RGB', (1, 1))
-        temp_draw = ImageDraw.Draw(temp_img)
-        font = ImageFont.load_default()  # Default font
-
-        # Calculate the required height for the legend
-        max_labels_per_line = image.width // 110
-        legend_height_per_line = 50
+        scaling_factor = image.width / 1024, image.height / 1024  # Scale legend based on image size
+        text_width, text_height = int(70 * scaling_factor[0]), int(30 * scaling_factor[1])
+        spacing = int(20 * scaling_factor[0])
+        item_width = spacing * 2 + text_width * 2 + text_height
+        max_labels_per_line = image.width // item_width
+        legend_height_per_line = int(50 * scaling_factor[1])
         num_lines = (len(labels) + max_labels_per_line - 1) // max_labels_per_line
         legend_height = legend_height_per_line * num_lines
+
+        # Create a temporary image to measure text size
+        font = ImageFont.load_default(size=text_height)  # Default font
 
         # Create a legend image
         legend = Image.new('RGB', (image.width, legend_height), (255, 255, 255))
         draw = ImageDraw.Draw(legend)
 
         # Variables to control label placement
-        spacing = 10
-        item_width = 25 + 70 + spacing
         x = (image.width - item_width * min(max_labels_per_line, len(labels))) // 2  # Centered
-        y = 20
+        y = text_height // 2
         label_count = 0
 
         for label, color in labels.items():
@@ -98,11 +123,10 @@ class Satlas:
                 x = (image.width - item_width * min(max_labels_per_line, len(labels))) // 2  # Centered
                 label_count = 0
 
-            draw.rectangle([x, y - 10, x + 20, y + 10], fill=color, outline=(0, 0, 0))
-            x += 25  # Shift for label text
-            text_width, text_height = 70, 30
-            draw.text((x, y - 10), label, fill=(0, 0, 0), font=font)
-            x += text_width + spacing
+            draw.rectangle([x, y, x + text_height, y + text_height], fill=color, outline=(0, 0, 0))
+            x += text_height + spacing  # Shift for label text
+            draw.text((x, y - text_height / 5), label, fill=(0, 0, 0), font=font)
+            x += item_width
             label_count += 1
 
         # Combine image with legend
@@ -141,7 +165,6 @@ class Satlas:
 
                 yield crop, row, col, original_height, original_width
 
-
     def load_image(self, image_path):
         """
         Load an image from a path.
@@ -164,7 +187,7 @@ class Satlas:
 
         return self.input_image
 
-    def evaluate(self, add_legend=False):
+    def evaluate(self, task: Task = Task.POLYGON, add_legend=False):
         """
         Evaluate the model on the image.
         """
@@ -174,46 +197,63 @@ class Satlas:
             print('No image loaded.')
             return
 
-        head_idx = 0
+        task_index = task.value
+        task_name = task.name.lower()
+        task_type = tasks[task_name]['type']
+
         crop_size = 1024
+        num_crops = (
+                    math.ceil(self.input_image.shape[0] / crop_size) * math.ceil(self.input_image.shape[1] / crop_size))
         vis_output = np.zeros((self.input_image.shape[0], self.input_image.shape[1], 3), dtype=np.uint8)
         used_labels = []  # Keep track of used labels (int) to add to legend
+        classification_results = torch.empty(len(tasks[task_name].get('categories', 0)))
 
         with torch.no_grad():
-            for crop, row, col, original_h, original_w in tqdm(self._image_crop_generator()):
+            for crop, row, col, original_h, original_w in tqdm(self._image_crop_generator(), total=num_crops):
                 vis_crop = crop.transpose(2, 0, 1)
                 gpu_crop = torch.as_tensor(vis_crop.copy()).to(self.device).float() / 255
                 outputs, _ = self.model([gpu_crop])
 
                 result_crop, _, _, _ = satlas.model.evaluate.visualize_outputs(
-                                task=self.config['Tasks'][head_idx]['Task'],
-                                image=crop,
-                                outputs=outputs[head_idx][0],
-                                return_vis=True,
-                            )
+                    task=self.config['Tasks'][task_index]['Task'],
+                    image=crop,
+                    outputs=outputs[task_index][0],
+                    return_vis=True,
+                )
 
-                vis_output[row:row+crop_size, col:col+crop_size, :] = result_crop[:original_h, :original_w, :]
-                if type(outputs[head_idx][0]) == dict:  # Check if the model has labels in the output
-                    used_labels += outputs[head_idx][0]['labels'].tolist()
+                if task_type == 'classification':
+                    new_results = outputs[task_index][0]
+                    # When splitting an image, take the max from each image
+                    classification_results = torch.max(new_results, classification_results)
+                else:
+                    if len(result_crop.shape) == 2:
+                        vis_output[row:row + crop_size, col:col + crop_size, 0] = result_crop[:original_h, :original_w]
+                        vis_output[row:row + crop_size, col:col + crop_size, 1] = result_crop[:original_h, :original_w]
+                        vis_output[row:row + crop_size, col:col + crop_size, 2] = result_crop[:original_h, :original_w]
+                    else:
+                        vis_output[row:row + crop_size, col:col + crop_size, :] = result_crop[:original_h, :original_w, :]
+                    if type(outputs[task_index][0]) == dict:  # Check if the model has labels in the output
+                        used_labels += outputs[task_index][0]['labels'].tolist()
 
+        if task_type == 'classification':
+            likelihood = classification_results.tolist()
+            # Print each category and its likelihood in % (rounded to 2 decimal places)
+            for i, category in enumerate(tasks[task_name].get('categories', [])):
+                print(f'{category}: {round(likelihood[i] * 100, 2)}%')
+
+        else:
             # Get the ids of all unique labels used
             if not used_labels:
-                task_name = self.config['Tasks'][head_idx]['Name']
-                used_labels = list(range(len(tasks[task_name]['categories'])))
+                used_labels = list(range(len(tasks[task_name].get('categories', []))))
             else:
                 used_labels = list(set(used_labels))  # Remove duplicates
-        image = Image.fromarray(vis_output)
+            image = Image.fromarray(vis_output)
 
-        if add_legend:
-            labels = tasks['polygon']
+            if add_legend:
+                labels = tasks[task_name]
 
-            labels_colors = {}
-            for used in used_labels:
-                labels_colors[labels["categories"][used]] = tuple(labels["colors"][used])
-            image = self._add_legend(image, labels_colors)
-        image.show()
-
-
-sat = Satlas()
-sat.load_image('./images/test_image.png')
-sat.evaluate(add_legend=True)
+                labels_colors = {}
+                for used in used_labels:
+                    labels_colors[labels["categories"][used]] = tuple(labels["colors"][used])
+                image = self._add_legend(image, labels_colors)
+            image.show()
