@@ -165,6 +165,29 @@ class Satlas:
 
                 yield crop, row, col, original_height, original_width
 
+    def _handle_classifications_output(self, classifications, task_name):
+        likelihood = classifications.tolist()
+        # Print each category and its likelihood in % (rounded to 2 decimal places)
+        for i, category in enumerate(tasks[task_name].get('categories', [])):
+            print(f'{category}: {round(likelihood[i] * 100, 2)}%')
+
+    def _handle_image_output(self, image, task_name, used_labels, add_legend=False):
+        # Get the ids of all unique labels used
+        if not used_labels:
+            used_labels = list(range(len(tasks[task_name].get('categories', []))))
+        else:
+            used_labels = list(set(used_labels))  # Remove duplicates
+        image = Image.fromarray(image)
+
+        if add_legend:
+            labels = tasks[task_name]
+
+            labels_colors = {}
+            for used in used_labels:
+                labels_colors[labels["categories"][used]] = tuple(labels["colors"][used])
+            image = self._add_legend(image, labels_colors)
+        image.show()
+
     def load_image(self, image_path):
         """
         Load an image from a path.
@@ -236,24 +259,7 @@ class Satlas:
                         used_labels += outputs[task_index][0]['labels'].tolist()
 
         if task_type == 'classification':
-            likelihood = classification_results.tolist()
-            # Print each category and its likelihood in % (rounded to 2 decimal places)
-            for i, category in enumerate(tasks[task_name].get('categories', [])):
-                print(f'{category}: {round(likelihood[i] * 100, 2)}%')
+            self._handle_classifications_output(classification_results, task_name)
 
         else:
-            # Get the ids of all unique labels used
-            if not used_labels:
-                used_labels = list(range(len(tasks[task_name].get('categories', []))))
-            else:
-                used_labels = list(set(used_labels))  # Remove duplicates
-            image = Image.fromarray(vis_output)
-
-            if add_legend:
-                labels = tasks[task_name]
-
-                labels_colors = {}
-                for used in used_labels:
-                    labels_colors[labels["categories"][used]] = tuple(labels["colors"][used])
-                image = self._add_legend(image, labels_colors)
-            image.show()
+            self._handle_image_output(vis_output, task_name, used_labels, add_legend)
