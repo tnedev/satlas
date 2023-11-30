@@ -21,7 +21,11 @@ pip install -r requirements.txt
 ## Usage
 The library offers an intuitive API for various tasks such as polygon detection, point detection, and image classification.
 
-
+### Image requirements
+The input image must be a 3-channel RGB image from the Sentinel 2 satellite.
+* Resolution is expected to be 10m per pixel.
+* Support of png, jpg, tiff, jp2
+* Large images will be split in 1024x1024 pixel sections and then the result will be put back to the original size.
 
 ### Load the Image
 ```python

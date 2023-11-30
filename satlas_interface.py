@@ -21,7 +21,7 @@ class Satlas:
     Satlas interface for using the Swin-v2-Base Sentinel-2, single-image, RGB model.
     """
 
-    img_formats = ['png', 'jpg', 'jpeg', 'jp2', 'tif']
+    img_formats = ['png', 'jpg', 'jpeg', 'jp2', 'tif', 'tiff']
 
     class Task(Enum):
         """
