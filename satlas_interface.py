@@ -229,7 +229,7 @@ class Satlas:
                     math.ceil(self.input_image.shape[0] / crop_size) * math.ceil(self.input_image.shape[1] / crop_size))
         vis_output = np.zeros((self.input_image.shape[0], self.input_image.shape[1], 3), dtype=np.uint8)
         used_labels = []  # Keep track of used labels (int) to add to legend
-        classification_results = torch.empty(len(tasks[task_name].get('categories', 0)))
+        classification_results = torch.empty(len(tasks[task_name].get('categories', [])))
 
         with torch.no_grad():
             for crop, row, col, original_h, original_w in tqdm(self._image_crop_generator(), total=num_crops):
