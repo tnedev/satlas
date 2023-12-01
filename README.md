@@ -13,7 +13,7 @@ Original paper [HERE](https://arxiv.org/abs/2211.15660)
 Clone this repository to get started:
 
 ```bash
-git clone https://github.com/<your-username>/satlas.git
+git clone https://github.com/tnedev/satlas.git
 cd satlas
 pip install -r requirements.txt
 ```
